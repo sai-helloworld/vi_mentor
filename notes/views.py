@@ -310,3 +310,50 @@ def get_teacher_id_by_email(request):
         return Response({'teacher_id': teacher.id}, status=status.HTTP_200_OK)
     except Teacher.DoesNotExist:
         return Response({'error': 'Teacher not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from .models import StudentQuizAttempt
+
+# @csrf_exempt
+# def get_student_quiz_attempts(request, student_id):
+#     """
+#     API endpoint: Get all quiz attempts for a student,
+#     including score, quiz title, description, and subject.
+#     """
+#     if request.method == "GET":
+#         attempts = StudentQuizAttempt.objects.filter(student__id=student_id).select_related("quiz__subject")
+
+#         data = []
+#         for attempt in attempts:
+#             data.append({
+#                 "quiz_id": attempt.quiz.id,
+#                 "quiz_title": attempt.quiz.title,
+#                 "quiz_description": attempt.quiz.description,
+#                 "subject": attempt.quiz.subject.name,   # assuming Subject has a 'name' field
+#                 "score": attempt.score,
+#                 "submitted_at": attempt.submitted_at,
+#             })
+
+#         return JsonResponse({"attempts": data}, safe=False)
+#     else:
+#         return JsonResponse({"error": "Only GET method allowed"}, status=405)
+from django.http import JsonResponse
+from .models import StudentQuizAttempt
+
+def get_student_quiz_attempts(request, student_id):
+    # student_id here is actually the roll_number string
+    attempts = StudentQuizAttempt.objects.filter(student__roll_number=student_id).select_related("quiz__subject")
+
+    data = []
+    for attempt in attempts:
+        data.append({
+            "quiz_id": attempt.quiz.id,
+            "quiz_title": attempt.quiz.title,
+            "quiz_description": attempt.quiz.description,
+            "subject": attempt.quiz.subject.name if hasattr(attempt.quiz.subject, "name") else str(attempt.quiz.subject),
+            "score": attempt.score,
+            "submitted_at": attempt.submitted_at,
+        })
+
+    return JsonResponse({"attempts": data}, safe=False)
