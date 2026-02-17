@@ -6,32 +6,6 @@ from django.core.files.storage import FileSystemStorage
 from .chatbot import ask_groq
 
 
-# -------------------------------
-# 1. Teacher Upload Notes
-# -------------------------------
-# @csrf_exempt
-# def upload_note(request):
-#     if request.method == "POST":
-#         subject = request.POST.get("subject")
-#         unit = request.POST.get("unit")
-#         title = request.POST.get("title")
-#         file = request.FILES.get("file")
-
-#         if not (subject and unit and title and file):
-#             return JsonResponse({"error": "All fields are required"}, status=400)
-
-#         fs = FileSystemStorage()
-#         filename = fs.save(file.name, file)
-
-#         note = Note(subject=subject, unit=unit, title=title, file=filename)
-#         note.save()
-#         print(f"Note uploaded: {note}")
-
-#         return JsonResponse({"message": "Note uploaded successfully!"})
-
-#     return JsonResponse({"error": "Invalid request"}, status=405)
-
-
 
 # -------------------------------
 # 3. Chatbot with Groq
@@ -71,25 +45,329 @@ def chatbot(request):
 
 
 
-from django.shortcuts import render
+# from django.shortcuts import render
+# from django.http import JsonResponse
+# from .models import ClassNote
+# from django.views.decorators.csrf import csrf_exempt
+
+# @csrf_exempt
+# def upload_notes(request, class_id, subject):
+#     if request.method == 'POST':
+#         pdf_file = request.FILES.get('pdf_file')
+#         if pdf_file:
+#             ClassNote.objects.create(
+#                 class_id=class_id,
+#                 subject_name=subject,
+#                 pdf_file=pdf_file
+#             )
+#             return JsonResponse({'status': 'success', 'message': 'Notes uploaded successfully'})
+#         return JsonResponse({'status': 'error', 'message': 'No file uploaded'}, status=400)
+    
+#     return render(request, 'upload_notes.html', {'class_id': class_id, 'subject': subject})
+# from django.shortcuts import render
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from .models import (
+#     ClassNote,
+#     Teacher,
+#     Subject,
+#     ClassSection,
+#     TeacherSubjectAssignment
+# )
+# from .rag_faiss_utils import build_or_update_faiss_index
+# import os
+
+# @csrf_exempt
+# def upload_notes(request, teacher_id, subject_id, section_id):
+#     """
+#     Teacher uploads notes for an assigned subject & section.
+#     FAISS index is created or updated automatically.
+#     """
+
+#     if request.method != 'POST':
+#         return JsonResponse(
+#             {'error': 'Only POST method allowed'},
+#             status=405
+#         )
+
+#     pdf_file = request.FILES.get('pdf_file')
+#     if not pdf_file:
+#         return JsonResponse(
+#             {'error': 'No PDF uploaded'},
+#             status=400
+#         )
+
+#     # Fetch objects
+#     try:
+#         teacher = Teacher.objects.get(id=teacher_id)
+#         subject = Subject.objects.get(id=subject_id)
+#         section = ClassSection.objects.get(id=section_id)
+#     except:
+#         return JsonResponse(
+#             {'error': 'Invalid teacher / subject / section'},
+#             status=400
+#         )
+
+#     # Authorization check
+#     if not TeacherSubjectAssignment.objects.filter(
+#         teacher=teacher,
+#         subject=subject,
+#         section=section
+#     ).exists():
+#         return JsonResponse(
+#             {'error': 'Teacher not assigned to this subject & section'},
+#             status=403
+#         )
+
+#     # Save PDF
+#     note = ClassNote.objects.create(
+#         class_id=section.name,      # stored as string (per your model)
+#         subject_name=subject.name,
+#         pdf_file=pdf_file
+#     )
+
+#     # Build FAISS path
+#     vector_dir = os.path.join(
+#         "vector_indexes",
+#         teacher.department.replace(" ", "_"),
+#         section.name,
+#         subject.name.lower()
+#     )
+
+#     # Update FAISS index
+#     build_or_update_faiss_index(
+#         pdf_path=note.pdf_file.path,
+#         vector_dir=vector_dir
+#     )
+
+#     return JsonResponse({
+#         'status': 'success',
+#         'message': 'Notes uploaded and FAISS index updated',
+#         'vector_path': vector_dir
+#     })
+
+
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_POST
+# from django.db import transaction
+# from django.conf import settings
+# from .models import (
+#     ClassNote,
+#     Teacher,
+#     Subject,
+#     ClassSection,
+#     TeacherSubjectAssignment
+# )
+# from .rag_faiss_utils import build_or_update_faiss_index
+# import os
+
+
+# @csrf_exempt
+# @require_POST
+# def upload_notes(request, teacher_id, subject_id, section_id):
+#     """
+#     Upload PDF or DOCX notes and update subject-specific FAISS index.
+#     CSRF exempt for frontend API usage.
+#     """
+
+#     uploaded_file = request.FILES.get("pdf_file")
+
+#     # 1️⃣ File existence check
+#     if not uploaded_file:
+#         return JsonResponse(
+#             {"error": "No file uploaded."},
+#             status=400
+#         )
+
+#     # 2️⃣ File type validation
+#     allowed_extensions = [".pdf", ".docx"]
+#     file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+#     if file_ext not in allowed_extensions:
+#         return JsonResponse(
+#             {"error": "Only PDF and DOCX files are allowed."},
+#             status=400
+#         )
+
+#     # 3️⃣ File size limit (10MB example)
+#     max_size = 10 * 1024 * 1024
+#     if uploaded_file.size > max_size:
+#         return JsonResponse(
+#             {"error": "File size exceeds 10MB limit."},
+#             status=400
+#         )
+
+#     # 4️⃣ Fetch DB objects safely
+#     try:
+#         teacher = Teacher.objects.get(id=teacher_id)
+#         subject = Subject.objects.get(id=subject_id)
+#         section = ClassSection.objects.get(id=section_id)
+#     except Teacher.DoesNotExist:
+#         return JsonResponse({"error": "Teacher not found."}, status=404)
+#     except Subject.DoesNotExist:
+#         return JsonResponse({"error": "Subject not found."}, status=404)
+#     except ClassSection.DoesNotExist:
+#         return JsonResponse({"error": "Section not found."}, status=404)
+
+#     # 5️⃣ Authorization check
+#     is_assigned = TeacherSubjectAssignment.objects.filter(
+#         teacher=teacher,
+#         subject=subject,
+#         section=section
+#     ).exists()
+
+#     if not is_assigned:
+#         return JsonResponse(
+#             {"error": "Teacher not assigned to this subject and section."},
+#             status=403
+#         )
+
+#     # 6️⃣ Save + FAISS update
+#     try:
+#         with transaction.atomic():
+
+#             note = ClassNote.objects.create(
+#                 class_id=section.name,
+#                 subject_name=subject.name,
+#                 pdf_file=uploaded_file
+#             )
+
+#             vector_dir = os.path.join(
+#                 settings.BASE_DIR,
+#                 "vector_indexes",
+#                 teacher.department.replace(" ", "_"),
+#                 section.name,
+#                 subject.name.lower()
+#             )
+
+#             build_or_update_faiss_index(
+#                 file_path=note.pdf_file.path,
+#                 vector_dir=vector_dir
+#             )
+
+#     except Exception as e:
+#         return JsonResponse(
+#             {"error": f"Indexing failed: {str(e)}"},
+#             status=500
+#         )
+
+#     return JsonResponse({
+#         "status": "success",
+#         "message": "Notes uploaded and FAISS index updated successfully."
+#     })
+
+
 from django.http import JsonResponse
-from .models import ClassNote
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.db import transaction
+from django.conf import settings
+from .models import (
+    ChatMessage,
+    ClassNote,
+    Teacher,
+    Subject,
+    ClassSection,
+    TeacherSubjectAssignment
+)
+from .rag_faiss_utils import build_or_update_faiss_index
+import os
+
 
 @csrf_exempt
-def upload_notes(request, class_id, subject):
-    if request.method == 'POST':
-        pdf_file = request.FILES.get('pdf_file')
-        if pdf_file:
-            ClassNote.objects.create(
-                class_id=class_id,
-                subject_name=subject,
-                pdf_file=pdf_file
+@require_POST
+def upload_notes(request, teacher_id, subject_id, section_id):
+    """
+    Upload PDF or DOCX notes and update subject-specific FAISS index.
+    """
+
+    uploaded_file = request.FILES.get("pdf_file")
+
+    if not uploaded_file:
+        return JsonResponse({"error": "No file uploaded."}, status=400)
+
+    # Validate extension
+    allowed_extensions = [".pdf", ".docx"]
+    file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+    if file_ext not in allowed_extensions:
+        return JsonResponse(
+            {"error": "Only PDF and DOCX files are allowed."},
+            status=400
+        )
+
+    # Validate file size (10MB)
+    max_size = 10 * 1024 * 1024
+    if uploaded_file.size > max_size:
+        return JsonResponse(
+            {"error": "File size exceeds 10MB limit."},
+            status=400
+        )
+
+    # Fetch database objects
+    try:
+        teacher = Teacher.objects.get(id=teacher_id)
+        subject = Subject.objects.get(id=subject_id)
+        section = ClassSection.objects.get(id=section_id)
+    except Teacher.DoesNotExist:
+        return JsonResponse({"error": "Teacher not found."}, status=404)
+    except Subject.DoesNotExist:
+        return JsonResponse({"error": "Subject not found."}, status=404)
+    except ClassSection.DoesNotExist:
+        return JsonResponse({"error": "Section not found."}, status=404)
+
+    # Authorization check
+    if not TeacherSubjectAssignment.objects.filter(
+        teacher=teacher,
+        subject=subject,
+        section=section
+    ).exists():
+        return JsonResponse(
+            {"error": "Teacher not assigned to this subject and section."},
+            status=403
+        )
+
+    # Save + Index
+    try:
+        with transaction.atomic():
+
+            note = ClassNote.objects.create(
+                class_id=section.name,
+                subject_name=subject.name,
+                pdf_file=uploaded_file
             )
-            return JsonResponse({'status': 'success', 'message': 'Notes uploaded successfully'})
-        return JsonResponse({'status': 'error', 'message': 'No file uploaded'}, status=400)
-    
-    return render(request, 'upload_notes.html', {'class_id': class_id, 'subject': subject})
+
+            vector_dir = os.path.join(
+                settings.BASE_DIR,
+                "vector_indexes",
+                teacher.department.replace(" ", "_"),
+                section.name,
+                subject.name.lower()
+            )
+
+            result = build_or_update_faiss_index(
+                file_path=note.pdf_file.path,
+                vector_dir=vector_dir
+            )
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": f"Indexing failed: {str(e)}"},
+            status=500
+        )
+
+    if result == "duplicate":
+        message = "File already indexed. Duplicate skipped."
+    else:
+        message = "Notes uploaded and FAISS index updated successfully."
+
+    return JsonResponse({
+        "status": "success",
+        "message": message,
+        "section": section.name,
+        "subject": subject.name
+    })
 
 
 
@@ -228,58 +506,263 @@ def add_question(request):
         return Response({'message': 'Question added', 'question_id': question.id}, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+# @api_view(['POST'])
+# def submit_quiz(request):
+#     data = request.data
+
+#     required_fields = ['quiz_id', 'student_roll_number', 'answers']
+#     if not all(field in data for field in required_fields):
+#         return Response({'error': 'Missing required fields'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     quiz_id = data['quiz_id']
+#     roll_number = data['student_roll_number']
+#     answers = data['answers']  # list of {question_id, selected_option}
+
+#     if not isinstance(answers, list) or not answers:
+#         return Response({'error': 'Answers must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     try:
+#         student = Student.objects.get(roll_number=roll_number)
+#         score = 0
+#         attempt = StudentQuizAttempt.objects.create(student=student, quiz_id=quiz_id, score=0)
+
+#         for ans in answers:
+#             question_id = ans.get('question_id')
+#             selected_option = ans.get('selected_option', '').upper()
+
+#             if not question_id or selected_option not in ['A', 'B', 'C', 'D']:
+#                 continue
+
+#             try:
+#                 question = Question.objects.get(id=question_id)
+#                 is_correct = (selected_option == question.correct_option)
+#                 if is_correct:
+#                     score += 1
+
+#                 StudentAnswer.objects.create(
+#                     attempt=attempt,
+#                     question=question,
+#                     selected_option=selected_option,
+#                     is_correct=is_correct
+#                 )
+#             except Question.DoesNotExist:
+#                 continue
+
+#         attempt.score = score
+#         attempt.save()
+
+#         return Response({'message': 'Quiz submitted successfully', 'score': score}, status=status.HTTP_200_OK)
+
+#     except Student.DoesNotExist:
+#         return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+#     except Exception as e:
+#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+   
+# from rest_framework.decorators import api_view
+# from rest_framework.response import Response
+# from rest_framework import status
+# from .models import Student, Quiz, Question, StudentQuizAttempt, StudentAnswer
+
+# @api_view(['POST'])
+# def submit_quiz(request):
+#     data = request.data
+
+#     required_fields = ['quiz_id', 'student_roll_number', 'answers']
+#     if not all(field in data for field in required_fields):
+#         return Response({'error': 'Missing required fields'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     quiz_id = data['quiz_id']
+#     roll_number = data['student_roll_number']
+#     answers = data['answers']  # list of {question_id, selected_option}
+
+#     if not isinstance(answers, list) or not answers:
+#         return Response({'error': 'Answers must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+
+#     try:
+#         student = Student.objects.get(roll_number=roll_number)
+#         quiz = Quiz.objects.get(id=quiz_id)
+
+#         # Prevent duplicate attempts
+#         if StudentQuizAttempt.objects.filter(student=student, quiz=quiz).exists():
+#             return Response({'error': 'Quiz already attempted'}, status=status.HTTP_400_BAD_REQUEST)
+
+#         score = 0
+#         attempt = StudentQuizAttempt.objects.create(student=student, quiz=quiz, score=0)
+
+#         for ans in answers:
+#             question_id = ans.get('question_id')
+#             selected_option = ans.get('selected_option', '').upper()
+
+#             if not question_id or selected_option not in ['A', 'B', 'C', 'D']:
+#                 continue
+
+#             try:
+#                 question = Question.objects.get(id=question_id)
+#                 is_correct = (selected_option == question.correct_option)
+#                 if is_correct:
+#                     score += 1
+
+#                 StudentAnswer.objects.create(
+#                     attempt=attempt,
+#                     question=question,
+#                     selected_option=selected_option,
+#                     is_correct=is_correct
+#                 )
+#             except Question.DoesNotExist:
+#                 continue
+
+#         attempt.score = score
+#         attempt.save()
+
+#         # Return detailed answers for frontend
+#         answers_data = [
+#             {
+#                 "question_text": ans.question.text,
+#                 "selected_option": ans.selected_option,
+#                 "correct_option": ans.question.correct_option,
+#                 "is_correct": ans.is_correct,
+#             }
+#             for ans in attempt.answers.all()
+#         ]
+
+#         return Response({
+#             'message': 'Quiz submitted successfully',
+#             'score': score,
+#             'answers': answers_data
+#         }, status=status.HTTP_200_OK)
+
+#     except Student.DoesNotExist:
+#         return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+#     except Quiz.DoesNotExist:
+#         return Response({'error': 'Quiz not found'}, status=status.HTTP_404_NOT_FOUND)
+#     except Exception as e:
+#         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from django.db import transaction
+
+from .models import Student, Quiz, Question, StudentQuizAttempt, StudentAnswer
+
+
 @api_view(['POST'])
 def submit_quiz(request):
     data = request.data
 
     required_fields = ['quiz_id', 'student_roll_number', 'answers']
     if not all(field in data for field in required_fields):
-        return Response({'error': 'Missing required fields'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Missing required fields'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     quiz_id = data['quiz_id']
     roll_number = data['student_roll_number']
     answers = data['answers']  # list of {question_id, selected_option}
 
     if not isinstance(answers, list) or not answers:
-        return Response({'error': 'Answers must be a non-empty list'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Answers must be a non-empty list'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     try:
         student = Student.objects.get(roll_number=roll_number)
-        score = 0
-        attempt = StudentQuizAttempt.objects.create(student=student, quiz_id=quiz_id, score=0)
+        quiz = Quiz.objects.get(id=quiz_id)
 
-        for ans in answers:
-            question_id = ans.get('question_id')
-            selected_option = ans.get('selected_option', '').upper()
+        # 🚫 Prevent duplicate submissions
+        if StudentQuizAttempt.objects.filter(student=student, quiz=quiz).exists():
+            return Response(
+                {'error': 'Quiz already attempted'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-            if not question_id or selected_option not in ['A', 'B', 'C', 'D']:
-                continue
+        # ✅ Atomic transaction guarantees consistency
+        with transaction.atomic():
+            attempt = StudentQuizAttempt.objects.create(
+                student=student,
+                quiz=quiz,
+                score=0
+            )
 
-            try:
-                question = Question.objects.get(id=question_id)
+            score = 0
+            valid_answer_count = 0
+
+            for ans in answers:
+                question_id = ans.get('question_id')
+                selected_option = ans.get('selected_option')
+
+                if not question_id or not selected_option:
+                    continue
+
+                selected_option = selected_option.upper()
+                if selected_option not in ['A', 'B', 'C', 'D']:
+                    continue
+
+                try:
+                    question = Question.objects.get(
+                        id=question_id,
+                        quiz=quiz   # 🔒 Enforce question–quiz consistency
+                    )
+                except Question.DoesNotExist:
+                    continue
+
                 is_correct = (selected_option == question.correct_option)
                 if is_correct:
                     score += 1
 
                 StudentAnswer.objects.create(
-                    attempt=attempt,
+                    attempt=attempt,      # ✅ SAME attempt object
                     question=question,
                     selected_option=selected_option,
                     is_correct=is_correct
                 )
-            except Question.DoesNotExist:
-                continue
 
-        attempt.score = score
-        attempt.save()
+                valid_answer_count += 1
 
-        return Response({'message': 'Quiz submitted successfully', 'score': score}, status=status.HTTP_200_OK)
+            # 🚫 No valid answers → rollback
+            if valid_answer_count == 0:
+                raise ValueError("No valid answers submitted")
+
+            attempt.score = score
+            attempt.save()
+
+        # ✅ Return saved answers
+        answers_data = [
+            {
+                "question_text": ans.question.text,
+                "selected_option": ans.selected_option,
+                "correct_option": ans.question.correct_option,
+                "is_correct": ans.is_correct,
+            }
+            for ans in attempt.answers.select_related("question")
+        ]
+
+        return Response(
+            {
+                'message': 'Quiz submitted successfully',
+                'attempt_id': attempt.id,
+                'score': score,
+                'answers': answers_data
+            },
+            status=status.HTTP_200_OK
+        )
 
     except Student.DoesNotExist:
         return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    except Quiz.DoesNotExist:
+        return Response({'error': 'Quiz not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    except ValueError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-   
+        return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['GET'])
 def get_student_score(request, student_roll_number, quiz_id):
@@ -310,7 +793,29 @@ def get_teacher_id_by_email(request):
         return Response({'teacher_id': teacher.id}, status=status.HTTP_200_OK)
     except Teacher.DoesNotExist:
         return Response({'error': 'Teacher not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+# views.py
+from rest_framework.response import Response
+from rest_framework.decorators import api_view
+from .models import StudentQuizAttempt, Quiz
+from .serializers import StudentQuizAttemptSerializer
+
+@api_view(['GET'])
+def teacher_quiz_performance(request, teacher_id):
+    # Get all quizzes conducted by this teacher
+    quizzes = Quiz.objects.filter(teacher_id=teacher_id)
+
+    # Get all student attempts for those quizzes
+    attempts = StudentQuizAttempt.objects.filter(quiz__in=quizzes).select_related('student', 'quiz').prefetch_related('answers')
+
+    serializer = StudentQuizAttemptSerializer(attempts, many=True)
+    return Response(serializer.data)
     
+
+
+
 # from django.http import JsonResponse
 # from django.views.decorators.csrf import csrf_exempt
 # from .models import StudentQuizAttempt
@@ -338,22 +843,491 @@ def get_teacher_id_by_email(request):
 #         return JsonResponse({"attempts": data}, safe=False)
 #     else:
 #         return JsonResponse({"error": "Only GET method allowed"}, status=405)
+# from django.http import JsonResponse
+# from .models import StudentQuizAttempt
+
+# def get_student_quiz_attempts(request, student_id):
+#     # student_id here is actually the roll_number string
+#     attempts = StudentQuizAttempt.objects.filter(student__roll_number=student_id).select_related("quiz__subject")
+
+#     data = []
+#     for attempt in attempts:
+#         data.append({
+#             "quiz_id": attempt.quiz.id,
+#             "quiz_title": attempt.quiz.title,
+#             "quiz_description": attempt.quiz.description,
+#             "subject": attempt.quiz.subject.name if hasattr(attempt.quiz.subject, "name") else str(attempt.quiz.subject),
+#             "score": attempt.score,
+#             "submitted_at": attempt.submitted_at,
+#         })
+
+#     return JsonResponse({"attempts": data}, safe=False)
+
 from django.http import JsonResponse
 from .models import StudentQuizAttempt
 
 def get_student_quiz_attempts(request, student_id):
-    # student_id here is actually the roll_number string
-    attempts = StudentQuizAttempt.objects.filter(student__roll_number=student_id).select_related("quiz__subject")
+    """
+    API to fetch all quiz attempts for a student (by roll_number).
+    Includes quiz info, section info, and detailed answers.
+    """
+    attempts = (
+        StudentQuizAttempt.objects
+        .filter(student__roll_number=student_id)
+        .select_related("quiz__subject", "student__section")
+        .prefetch_related("answers__question")
+    )
 
     data = []
     for attempt in attempts:
+        # Collect answers for this attempt
+        def option_text(question, opt):
+            return {
+                "A": question.option_a,
+                "B": question.option_b,
+                "C": question.option_c,
+                "D": question.option_d,
+            }.get(opt)
+
+        answers_data = [
+            {
+                "question_text": ans.question.text,
+                "options": {
+                    "A": ans.question.option_a,
+                    "B": ans.question.option_b,
+                    "C": ans.question.option_c,
+                    "D": ans.question.option_d,
+                },
+                "selected_option": ans.selected_option,
+                "selected_option_text": option_text(ans.question, ans.selected_option),
+                "correct_option": ans.question.correct_option,
+                "correct_option_text": option_text(
+                    ans.question, ans.question.correct_option
+                ),
+                "is_correct": ans.is_correct,
+            }
+            for ans in attempt.answers.select_related("question")
+        ]
+
+        print(answers_data)
+        # Build attempt dictionary
         data.append({
             "quiz_id": attempt.quiz.id,
             "quiz_title": attempt.quiz.title,
             "quiz_description": attempt.quiz.description,
-            "subject": attempt.quiz.subject.name if hasattr(attempt.quiz.subject, "name") else str(attempt.quiz.subject),
+            "subject": attempt.quiz.subject.name,
             "score": attempt.score,
             "submitted_at": attempt.submitted_at,
+            "section_name": attempt.student.section.name if attempt.student.section else None,
+            "section_year": attempt.student.section.year if attempt.student.section else None,
+            "answers": answers_data,
         })
 
-    return JsonResponse({"attempts": data}, safe=False)
+    return JsonResponse({"attempts": data})
+
+# get student details by roll_number
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Student
+
+@api_view(['GET'])
+def get_student_details(request, student_id):
+    """
+    API to fetch student details by roll_number (student_id).
+    """
+    try:
+        student = Student.objects.get(roll_number=student_id)
+        data = {
+            "roll_number": student.roll_number,
+            "name": student.name,
+            "email": student.email,
+            "year": student.year,
+            "section_id": student.section_id,
+            "section": student.section.name if student.section else None
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Student.DoesNotExist:
+        return Response(
+            {"error": "Student not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {"error": "Internal server error"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Student, Quiz, StudentQuizAttempt
+
+@api_view(['GET'])
+def get_unattempted_quizzes(request, student_id):
+    """
+    API to fetch all quizzes for a student's section that the student has NOT attempted yet.
+    """
+    try:
+        # Step 1: Get student
+        student = Student.objects.get(roll_number=student_id)
+
+        # Step 2: Get student's section
+        section = student.section
+        if not section:
+            return Response(
+                {"error": "Student does not belong to any section"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Step 3: Get all quizzes for this section
+        quizzes = Quiz.objects.filter(section=section)
+
+        # Step 4: Get quizzes already attempted by student
+        attempted_quiz_ids = StudentQuizAttempt.objects.filter(
+            student=student
+        ).values_list("quiz_id", flat=True)
+
+        # Step 5: Filter quizzes not attempted
+        unattempted_quizzes = quizzes.exclude(id__in=attempted_quiz_ids)
+
+        # Prepare response data
+        data = [
+            {
+                "quiz_id": quiz.id,
+                "title": quiz.title,
+                "description": quiz.description,
+                "subject": quiz.subject.name,
+                "teacher": quiz.teacher.name,
+                "created_at": quiz.created_at
+            }
+            for quiz in unattempted_quizzes
+        ]
+
+        return Response({"unattempted_quizzes": data}, status=status.HTTP_200_OK)
+
+    except Student.DoesNotExist:
+        return Response({"error": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+# get quiz
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Quiz, Question
+
+@api_view(['GET'])
+def get_quiz_details(request, quiz_id):
+    """
+    API to fetch quiz details (title, description, subject, teacher, section)
+    along with all questions and options using quiz_id.
+    """
+    try:
+        quiz = Quiz.objects.get(id=quiz_id)
+
+        # Prepare quiz metadata
+        quiz_data = {
+            "quiz_id": quiz.id,
+            "title": quiz.title,
+            "description": quiz.description,
+            "subject": quiz.subject.name,
+            "teacher": quiz.teacher.name,
+            "section": quiz.section.name,
+            "created_at": quiz.created_at,
+        }
+
+        # Prepare questions
+        questions = Question.objects.filter(quiz=quiz)
+        quiz_data["questions"] = [
+            {
+                "question_id": q.id,
+                "text": q.text,
+                "option_a": q.option_a,
+                "option_b": q.option_b,
+                "option_c": q.option_c,
+                "option_d": q.option_d,
+            }
+            for q in questions
+        ]
+
+        return Response(quiz_data, status=status.HTTP_200_OK)
+
+    except Quiz.DoesNotExist:
+        return Response({"error": "Quiz not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# views.py
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Teacher, TeacherSubjectAssignment
+
+@api_view(['GET'])
+def get_teacher_assignments(request, teacher_id):
+    """
+    API to fetch all sections and subjects assigned to a teacher using teacher_id.
+    """
+    try:
+        teacher = Teacher.objects.get(id=teacher_id)
+        assignments = TeacherSubjectAssignment.objects.filter(teacher=teacher)
+
+        data = {
+            "teacher_id": teacher.id,
+            "teacher_name": teacher.name,
+            "department": teacher.department,
+            "assignments": [
+                {
+                    "section_id": a.section.id,
+                    "section_name": a.section.name,
+                    "subject_id": a.subject.id,
+                    "subject_name": a.subject.name,
+                }
+                for a in assignments
+            ]
+        }
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Teacher.DoesNotExist:
+        return Response({"error": "Teacher not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+from .models import ChatSession
+
+@csrf_exempt
+@require_POST
+def create_new_chat(request):
+    data = json.loads(request.body)
+
+    roll_number = data.get("roll_number")
+    subject_id = data.get("subject_id")
+
+    try:
+        student = Student.objects.get(roll_number=roll_number)
+        subject = Subject.objects.get(id=subject_id)
+    except:
+        return JsonResponse({"error": "Invalid student or subject"}, status=400)
+
+    session = ChatSession.objects.create(
+        student=student,
+        subject=subject,
+        section=student.section,
+        title="New Conversation"
+    )
+
+    return JsonResponse({"session_id": session.id})
+
+
+
+def get_student_chats(request, roll_number):
+    try:
+        student = Student.objects.get(roll_number=roll_number)
+    except:
+        return JsonResponse({"error": "Student not found"}, status=404)
+
+    sessions = ChatSession.objects.filter(
+        student=student
+    ).order_by("-updated_at")
+
+    data = []
+
+    for session in sessions:
+        data.append({
+            "session_id": session.id,
+            "title": session.title or session.subject.name,
+            "subject": session.subject.name,
+            "updated_at": session.updated_at
+        })
+
+    return JsonResponse({"sessions": data})
+
+
+from .models import ChatMessage
+def get_chat_history(request, session_id):
+    try:
+        session = ChatSession.objects.get(id=session_id)
+    except:
+        return JsonResponse({"error": "Invalid session"}, status=404)
+
+    messages = ChatMessage.objects.filter(
+        session=session
+    ).order_by("created_at")
+
+    data = []
+
+    for msg in messages:
+        data.append({
+            "sender": msg.sender,
+            "message": msg.message_text,
+            "created_at": msg.created_at
+        })
+
+    return JsonResponse({"messages": data})
+
+
+
+from .rag_faiss_utils import load_faiss_index, search_with_threshold
+from langchain_openai import ChatOpenAI
+from django.utils import timezone
+from dotenv import load_dotenv
+import os
+import json
+load_dotenv()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+@csrf_exempt
+@require_POST
+def ask_question(request):
+    
+    data = json.loads(request.body)
+
+    session_id = data.get("session_id")
+    question = data.get("question")
+
+    try:
+        session = ChatSession.objects.get(id=session_id)
+    except:
+        return JsonResponse({"error": "Invalid session"}, status=400)
+
+    # 🔹 Load FAISS index
+    vector_dir = os.path.join(
+    settings.BASE_DIR,
+    "vector_indexes",
+    session.subject.teachersubjectassignment_set.first().teacher.department.replace(" ", "_"),
+    session.section.name,
+    session.subject.name.lower()
+    )
+
+
+    try:
+        vectorstore = load_faiss_index(vector_dir)
+        print(vector_dir)
+    except:
+        print('the vector dir is ',vector_dir)
+        print('the os path is ',os.path.exists(vector_dir))
+
+        return JsonResponse({
+            "answer": "No syllabus content found for this subject."
+        })
+
+    docs = search_with_threshold(vectorstore, question, k=3)
+
+    if not docs:
+        answer = "This question is outside the syllabus and no docs."
+    else:
+        retrieved_context = "\n\n".join(
+            [doc.page_content for doc in docs]
+        )
+
+        # 🔹 Load recent history (last 6 messages)
+        history = ChatMessage.objects.filter(
+            session=session
+        ).order_by("-created_at")[:6]
+
+        history = reversed(history)
+
+        messages = []
+
+        messages.append({
+            "role": "system",
+            "content": (
+                "You are a syllabus-constrained academic assistant. "
+                "Use only authorized syllabus content. "
+                "If answer not found, say: "
+                "'This question is outside the syllabus.'"
+            )
+        })
+
+        for msg in history:
+            role = "user" if msg.sender == "USER" else "assistant"
+            messages.append({
+                "role": role,
+                "content": msg.message_text
+            })
+
+        messages.append({
+            "role": "system",
+            "content": f"Authorized syllabus content:\n{retrieved_context}"
+        })
+
+        messages.append({
+            "role": "user",
+            "content": question
+        })
+
+        llm = ChatOpenAI(
+            model="nvidia/nemotron-3-nano-30b-a3b:free",
+            openai_api_key=OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1",
+            temperature=0
+        )
+
+        response = llm.invoke(messages)
+        answer = response.content.strip()
+
+    # 🔹 Save messages
+    ChatMessage.objects.create(
+        session=session,
+        sender="USER",
+        message_text=question
+    )
+
+    ChatMessage.objects.create(
+        session=session,
+        sender="BOT",
+        message_text=answer
+    )
+
+    # 🔹 Update session timestamp
+    session.updated_at = timezone.now()
+
+    # 🔹 Auto-generate title
+    if session.title == "New Conversation":
+        session.title = question[:50]
+    session.save()
+
+    return JsonResponse({"answer": answer})
+
+
+
+
+from django.http import JsonResponse
+from .models import Student, TeacherSubjectAssignment
+
+@csrf_exempt
+
+def get_student_subjects(request, roll_number):
+    try:
+        student = Student.objects.get(roll_number=roll_number)
+    except Student.DoesNotExist:
+        return JsonResponse({"error": "Student not found"}, status=404)
+
+    section = student.section
+
+    # Get subjects assigned to this section
+    assignments = TeacherSubjectAssignment.objects.filter(
+        section=section
+    ).select_related("subject")
+
+    subjects = []
+    unique_subject_ids = set()
+
+    for assignment in assignments:
+        if assignment.subject.id not in unique_subject_ids:
+            subjects.append({
+                "id": assignment.subject.id,
+                "name": assignment.subject.name
+            })
+            unique_subject_ids.add(assignment.subject.id)
+
+    return JsonResponse({"subjects": subjects})

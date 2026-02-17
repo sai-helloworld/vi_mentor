@@ -113,3 +113,42 @@ class StudentAnswer(models.Model):
     def __str__(self):
         return f"{self.attempt.student.name} - Q{self.question.id} - {self.selected_option}"
 
+
+
+# 🧠 Chat Session
+class ChatSession(models.Model):
+    id = models.AutoField(primary_key=True)
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        related_name="chat_sessions"
+    )
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+    section = models.ForeignKey(ClassSection, on_delete=models.CASCADE)
+
+    title = models.CharField(max_length=255, blank=True)
+    summary = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.student.roll_number} - {self.title or self.subject.name}"
+
+
+# 💬 Chat Message
+class ChatMessage(models.Model):
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="messages"
+    )
+    sender = models.CharField(
+        max_length=10,
+        choices=[("USER", "User"), ("BOT", "Bot")]
+    )
+    message_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.sender}: {self.message_text[:30]}"

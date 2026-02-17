@@ -1,0 +1,11 @@
+langchain 
+langchain-community 
+langchain_openai
+langchain_core
+faiss-cpu
+sentence-transformers 
+pypdf
+python-docx 
+python-dotenv
+docx2txt
+dotenv
