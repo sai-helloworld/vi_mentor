@@ -2,6 +2,8 @@ langchain
 langchain-community 
 langchain_openai
 langchain_core
+langchain-huggingface
+langsmith
 faiss-cpu
 sentence-transformers 
 pypdf
@@ -9,3 +11,5 @@ python-docx
 python-dotenv
 docx2txt
 dotenv
+rank_bm25
+pydantic

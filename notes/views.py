@@ -1176,78 +1176,356 @@ def get_chat_history(request, session_id):
 
 
 
-from .rag_faiss_utils import load_faiss_index, search_with_threshold
+# from .rag_faiss_utils import load_faiss_index, search_with_threshold
+# from langchain_openai import ChatOpenAI
+# from django.utils import timezone
+# from dotenv import load_dotenv
+# import os
+# import json
+# load_dotenv()
+# OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# @csrf_exempt
+# @require_POST
+# def ask_question(request):
+    
+#     data = json.loads(request.body)
+
+#     session_id = data.get("session_id")
+#     question = data.get("question")
+
+#     try:
+#         session = ChatSession.objects.get(id=session_id)
+#     except:
+#         return JsonResponse({"error": "Invalid session"}, status=400)
+
+#     # 🔹 Load FAISS index
+#     vector_dir = os.path.join(
+#     settings.BASE_DIR,
+#     "vector_indexes",
+#     session.subject.teachersubjectassignment_set.first().teacher.department.replace(" ", "_"),
+#     session.section.name,
+#     session.subject.name.lower()
+#     )
+
+
+#     try:
+#         vectorstore = load_faiss_index(vector_dir)
+#         print(vector_dir)
+#     except:
+#         print('the vector dir is ',vector_dir)
+#         print('the os path is ',os.path.exists(vector_dir))
+
+#         return JsonResponse({
+#             "answer": "No syllabus content found for this subject."
+#         })
+
+#     docs = search_with_threshold(vectorstore, question, k=3)
+
+#     if not docs:
+#         answer = "This question is outside the syllabus and no docs."
+#     else:
+#         retrieved_context = "\n\n".join(
+#             [doc.page_content for doc in docs]
+#         )
+
+#         # 🔹 Load recent history (last 6 messages)
+#         history = ChatMessage.objects.filter(
+#             session=session
+#         ).order_by("-created_at")[:6]
+
+#         history = reversed(history)
+
+#         messages = []
+
+#         messages.append({
+#             "role": "system",
+#             "content": (
+#                 "You are a syllabus-constrained academic assistant. "
+#                 "Use only authorized syllabus content. "
+#                 "If answer not found, say: "
+#                 "'This question is outside the syllabus.'"
+#             )
+#         })
+
+#         for msg in history:
+#             role = "user" if msg.sender == "USER" else "assistant"
+#             messages.append({
+#                 "role": role,
+#                 "content": msg.message_text
+#             })
+
+#         messages.append({
+#             "role": "system",
+#             "content": f"Authorized syllabus content:\n{retrieved_context}"
+#         })
+
+#         messages.append({
+#             "role": "user",
+#             "content": question
+#         })
+
+#         llm = ChatOpenAI(
+#             model="nvidia/nemotron-3-nano-30b-a3b:free",
+#             openai_api_key=OPENROUTER_API_KEY,
+#             openai_api_base="https://openrouter.ai/api/v1",
+#             temperature=0
+#         )
+
+#         response = llm.invoke(messages)
+#         answer = response.content.strip()
+
+#     # 🔹 Save messages
+#     ChatMessage.objects.create(
+#         session=session,
+#         sender="USER",
+#         message_text=question
+#     )
+
+#     ChatMessage.objects.create(
+#         session=session,
+#         sender="BOT",
+#         message_text=answer
+#     )
+
+#     # 🔹 Update session timestamp
+#     session.updated_at = timezone.now()
+
+#     # 🔹 Auto-generate title
+#     if session.title == "New Conversation":
+#         session.title = question[:50]
+#     session.save()
+
+#     return JsonResponse({"answer": answer})
+
+
+
+# from .rag_faiss_utils import get_hybrid_retriever
+# from langchain_openai import ChatOpenAI
+# from django.utils import timezone
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_POST
+# from django.conf import settings
+# from .models import ChatSession, ChatMessage
+# import os
+# import json
+# from dotenv import load_dotenv
+# from langchain_classic.callbacks.tracers import LangChainTracer
+# from pydantic import BaseModel, Field
+
+# load_dotenv()
+# # We use the OpenRouter Key to access the Nvidia model
+# OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# tracer = LangChainTracer(project_name=os.getenv("LANGSMITH_PROJECT"))
+# @csrf_exempt
+# @require_POST
+# def ask_question(request):
+#     data = json.loads(request.body)
+#     session_id = data.get("session_id")
+#     question = data.get("question")
+
+#     try:
+#         session = ChatSession.objects.get(id=session_id)
+#     except ChatSession.DoesNotExist:
+#         return JsonResponse({"error": "Invalid session"}, status=400)
+
+#     # 🔹 1. Construct Path to Vector Store
+#     # Note: Ensure the teacher relationship exists
+#     teacher_assignment = session.subject.teachersubjectassignment_set.first()
+#     if not teacher_assignment:
+#          return JsonResponse({"answer": "No teacher assigned to this subject yet."})
+
+#     vector_dir = os.path.join(
+#         settings.BASE_DIR,
+#         "vector_indexes",
+#         teacher_assignment.teacher.department.replace(" ", "_"),
+#         session.section.name,
+#         session.subject.name.lower()
+#     )
+
+#     # 🔹 2. Get Hybrid Retriever
+#     retriever = get_hybrid_retriever(vector_dir)
+    
+#     if not retriever:
+#         return JsonResponse({
+#             "answer": "No syllabus content found for this subject."
+#         })
+
+#     # 🔹 3. Retrieve Documents (Vector + Keyword)
+#     docs = retriever.invoke(question)
+
+#     if not docs:
+#         retrieved_context = "No relevant context found in notes."
+#     else:
+#         retrieved_context = "\n\n".join([doc.page_content for doc in docs])
+
+#     # 🔹 4. Build Chat History
+#     history = ChatMessage.objects.filter(session=session).order_by("-created_at")[:6]
+#     history = reversed(history)
+
+#     messages = []
+#     class Good_response(BaseModel):
+#         answer: str
+#         follow_up_question_1: str
+#         follow_up_question_2: str
+#         follow_up_question_3: str
+
+    
+#     # System Prompt: Strict Syllabus Adherence
+#     messages.append({
+#         "role": "system",
+#         "content": (
+#             "You are a helpful academic assistant strictly bound by the provided syllabus context. "
+#             "Use ONLY the Context below to answer. "
+#             "If the answer is not in the Context, explicitly state: 'This question is outside the syllabus provided in the notes.' "
+#             "Do not hallucinate or use outside knowledge."
+#         )
+#     })
+
+#     # Add History
+#     for msg in history:
+#         role = "user" if msg.sender == "USER" else "assistant"
+#         messages.append({"role": role, "content": msg.message_text})
+
+#     # Add Current Question + Context
+#     messages.append({
+#         "role": "user",
+#         "content": f"Context:\n{retrieved_context}\n\nQuestion: {question}"
+#     })
+
+#     # 🔹 5. Call LLM (NVIDIA Model via OpenRouter)
+#     # We use ChatOpenAI client because OpenRouter is OpenAI-compatible
+#     llm = ChatOpenAI(
+#         model="nvidia/nemotron-3-nano-30b-a3b:free", # Your specific model
+#         openai_api_key=OPENROUTER_API_KEY,
+#         openai_api_base="https://openrouter.ai/api/v1",
+#         temperature=0.2, # Low temperature for factual accuracy
+#         callbacks = [tracer]
+
+#     )
+#     llm_with_structured_output = llm.with_structured_output(Good_response)
+
+#     try:
+#         response = llm_with_structured_output.invoke(messages)
+#     except Exception as e:
+#         return JsonResponse({"error": str(e)}, status=500)
+
+#     answer = response.answer
+
+#     # 🔹 6. Save Conversation
+#     ChatMessage.objects.create(session=session, sender="USER", message_text=question)
+#     ChatMessage.objects.create(session=session, sender="BOT", message_text=answer)
+    
+#     session.updated_at = timezone.now()
+#     if session.title == "New Conversation":
+#         session.title = question[:50]
+#     session.save()
+#     print(answer, follow_ups)
+#     return JsonResponse({
+#     "answer": answer,
+#     "follow_up_questions": follow_ups[:3]
+# })
+
+
+
+
+from .rag_faiss_utils import get_hybrid_retriever
 from langchain_openai import ChatOpenAI
 from django.utils import timezone
-from dotenv import load_dotenv
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.conf import settings
+from .models import ChatSession, ChatMessage
 import os
 import json
+import re
+from dotenv import load_dotenv
+from langchain_classic.callbacks.tracers import LangChainTracer
+
 load_dotenv()
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+tracer = LangChainTracer(project_name=os.getenv("LANGSMITH_PROJECT"))
+
 
 @csrf_exempt
 @require_POST
 def ask_question(request):
-    
-    data = json.loads(request.body)
-
-    session_id = data.get("session_id")
-    question = data.get("question")
-
     try:
-        session = ChatSession.objects.get(id=session_id)
-    except:
-        return JsonResponse({"error": "Invalid session"}, status=400)
+        data = json.loads(request.body)
+        session_id = data.get("session_id")
+        question = data.get("question")
 
-    # 🔹 Load FAISS index
-    vector_dir = os.path.join(
-    settings.BASE_DIR,
-    "vector_indexes",
-    session.subject.teachersubjectassignment_set.first().teacher.department.replace(" ", "_"),
-    session.section.name,
-    session.subject.name.lower()
-    )
+        if not session_id or not question:
+            return JsonResponse({"error": "Missing session_id or question"}, status=400)
 
+        try:
+            session = ChatSession.objects.get(id=session_id)
+        except ChatSession.DoesNotExist:
+            return JsonResponse({"error": "Invalid session"}, status=400)
 
-    try:
-        vectorstore = load_faiss_index(vector_dir)
-        print(vector_dir)
-    except:
-        print('the vector dir is ',vector_dir)
-        print('the os path is ',os.path.exists(vector_dir))
+        # 🔹 1. Construct Vector Path
+        teacher_assignment = session.subject.teachersubjectassignment_set.first()
+        if not teacher_assignment:
+            return JsonResponse({
+                "answer": "No teacher assigned to this subject yet.",
+                "follow_up_questions": []
+            })
 
-        return JsonResponse({
-            "answer": "No syllabus content found for this subject."
-        })
-
-    docs = search_with_threshold(vectorstore, question, k=3)
-
-    if not docs:
-        answer = "This question is outside the syllabus and no docs."
-    else:
-        retrieved_context = "\n\n".join(
-            [doc.page_content for doc in docs]
+        vector_dir = os.path.join(
+            settings.BASE_DIR,
+            "vector_indexes",
+            teacher_assignment.teacher.department.replace(" ", "_"),
+            session.section.name,
+            session.subject.name.lower()
         )
 
-        # 🔹 Load recent history (last 6 messages)
-        history = ChatMessage.objects.filter(
-            session=session
-        ).order_by("-created_at")[:6]
+        # 🔹 2. Get Retriever
+        retriever = get_hybrid_retriever(vector_dir)
 
+        if not retriever:
+            return JsonResponse({
+                "answer": "No syllabus content found for this subject.",
+                "follow_up_questions": []
+            })
+
+        # 🔹 3. Retrieve Context
+        docs = retriever.invoke(question)
+
+        if not docs:
+            retrieved_context = "No relevant context found in notes."
+        else:
+            retrieved_context = "\n\n".join([doc.page_content for doc in docs])
+
+        # 🔹 4. Build Chat History (Last 6 Messages)
+        history = ChatMessage.objects.filter(session=session)\
+            .order_by("-created_at")[:6]
         history = reversed(history)
 
         messages = []
 
+        # 🔹 Strict JSON + Syllabus Enforcement Prompt
+        system_prompt = (
+            "You are a helpful academic assistant strictly bound by the provided syllabus context.\n"
+            "Use ONLY the Context below to answer.\n"
+            "If the answer is not in the Context, respond exactly:\n"
+            "'This question is outside the syllabus provided in the notes.'\n\n"
+            "You MUST respond ONLY in valid JSON format like this:\n"
+            "{\n"
+            '  "answer": "string",\n'
+            '  "follow_up_questions": ["q1", "q2", "q3"]\n'
+            "}\n"
+            "Do not include any extra text outside JSON."
+        )
+
         messages.append({
             "role": "system",
-            "content": (
-                "You are a syllabus-constrained academic assistant. "
-                "Use only authorized syllabus content. "
-                "If answer not found, say: "
-                "'This question is outside the syllabus.'"
-            )
+            "content": system_prompt
         })
 
+        # Add conversation history
         for msg in history:
             role = "user" if msg.sender == "USER" else "assistant"
             messages.append({
@@ -1255,48 +1533,79 @@ def ask_question(request):
                 "content": msg.message_text
             })
 
-        messages.append({
-            "role": "system",
-            "content": f"Authorized syllabus content:\n{retrieved_context}"
-        })
-
+        # Add current question with context
         messages.append({
             "role": "user",
-            "content": question
+            "content": f"Context:\n{retrieved_context}\n\nQuestion: {question}"
         })
 
+        # 🔹 5. Call LLM
         llm = ChatOpenAI(
             model="nvidia/nemotron-3-nano-30b-a3b:free",
             openai_api_key=OPENROUTER_API_KEY,
             openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0
+            temperature=0.2,
+            callbacks=[tracer]
         )
 
-        response = llm.invoke(messages)
-        answer = response.content.strip()
+        raw_response = llm.invoke(messages)
+        content = raw_response.content.strip()
 
-    # 🔹 Save messages
-    ChatMessage.objects.create(
-        session=session,
-        sender="USER",
-        message_text=question
-    )
+        # 🔹 6. Safe JSON Extraction
+        try:
+            # Try direct parse
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            # Try extracting JSON block if model added extra text
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+            else:
+                raise ValueError("Model did not return valid JSON.")
 
-    ChatMessage.objects.create(
-        session=session,
-        sender="BOT",
-        message_text=answer
-    )
+        answer = parsed.get("answer", "Error generating answer.")
+        follow_ups = parsed.get("follow_up_questions", [])
 
-    # 🔹 Update session timestamp
-    session.updated_at = timezone.now()
+        # Ensure exactly 3 follow-ups
+        if not isinstance(follow_ups, list):
+            follow_ups = []
 
-    # 🔹 Auto-generate title
-    if session.title == "New Conversation":
-        session.title = question[:50]
-    session.save()
+        while len(follow_ups) < 3:
+            follow_ups.append("")
 
-    return JsonResponse({"answer": answer})
+        follow_ups = follow_ups[:3]
+
+        # 🔹 7. Save Conversation
+        ChatMessage.objects.create(
+            session=session,
+            sender="USER",
+            message_text=question
+        )
+
+        ChatMessage.objects.create(
+            session=session,
+            sender="BOT",
+            message_text=answer
+        )
+
+        session.updated_at = timezone.now()
+        if session.title == "New Conversation":
+            session.title = question[:50]
+        session.save()
+
+        return JsonResponse({
+            "answer": answer,
+            "follow_up_questions": follow_ups
+        })
+
+    except Exception as e:
+        print("🔥 API Error:", str(e))
+        return JsonResponse({
+            "answer": "Error generating response.",
+            "follow_up_questions": []
+        }, status=500)
+
+
 
 
 
