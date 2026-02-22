@@ -404,6 +404,55 @@ def download_note(request, note_id):
         return JsonResponse({'error': 'Note not found'}, status=404)
 
 
+from django.db.models import Q
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+from .models import Teacher, TeacherSubjectAssignment, ClassNote
+
+@require_GET
+def get_notes_by_teacher(request, teacher_id):
+    """
+    Retrieve all notes for the subjects and sections assigned to a specific teacher.
+    """
+    try:
+        # Check if teacher exists
+        teacher = Teacher.objects.get(id=teacher_id)
+    except Teacher.DoesNotExist:
+        return JsonResponse({"error": "Teacher not found."}, status=404)
+
+    # Get all subject/section assignments for this teacher
+    assignments = TeacherSubjectAssignment.objects.filter(teacher=teacher).select_related('section', 'subject')
+    
+    if not assignments.exists():
+        # If the teacher has no assigned classes, return an empty list
+        return JsonResponse([], safe=False)
+
+    # Build a dynamic query to match assigned class_id and subject_name
+    query = Q()
+    for assignment in assignments:
+        query |= Q(
+            class_id__iexact=assignment.section.name, 
+            subject_name__iexact=assignment.subject.name
+        )
+
+    # Fetch notes matching the teacher's assignments
+    notes = ClassNote.objects.filter(query).distinct().order_by('-uploaded_at')
+
+    # Format the response data
+    data = [
+        {
+            'id': note.id,
+            'filename': note.pdf_file.name.split('/')[-1],
+            'class_name': note.class_id,
+            'subject_name': note.subject_name,
+            'uploaded_at': note.uploaded_at.strftime('%Y-%m-%d %H:%M'),
+            'file_url': note.pdf_file.url if note.pdf_file else None
+        }
+        for note in notes
+    ]
+
+    return JsonResponse(data, safe=False)
+
 
 
 
@@ -1508,10 +1557,11 @@ def ask_question(request):
 
         # 🔹 Strict JSON + Syllabus Enforcement Prompt
         system_prompt = (
-            "You are a helpful academic assistant strictly bound by the provided syllabus context.\n"
-            "Use ONLY the Context below to answer.\n"
+            "You are a helpful academic assistant strictly bound by the terms provided in the syllabus context.\n"
+            "Use ONLY the terms used in Context below to answer, but you are free to use outside examples to simplify the answers.\n"
             "If the answer is not in the Context, respond exactly:\n"
             "'This question is outside the syllabus provided in the notes.'\n\n"
+            "If the user says to explain in detail use some examples outside of the cotext but don't introduce new terms to the response:\n"
             "You MUST respond ONLY in valid JSON format like this:\n"
             "{\n"
             '  "answer": "string",\n'
@@ -1640,3 +1690,121 @@ def get_student_subjects(request, roll_number):
             unique_subject_ids.add(assignment.subject.id)
 
     return JsonResponse({"subjects": subjects})
+
+
+
+
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST, require_GET
+from .models import Notification, Teacher, ClassSection, Subject, Student
+
+# ---------------------------------------------------------
+# TEACHER: Create a Notification
+# ---------------------------------------------------------
+@csrf_exempt
+@require_POST
+def create_notification(request):
+    try:
+        data = json.loads(request.body)
+        
+        teacher_id = data.get('teacher_id')
+        section_id = data.get('section_id')
+        subject_id = data.get('subject_id') # Optional
+        title = data.get('title')
+        message = data.get('message')
+        deadline = data.get('deadline') # Expected format: "YYYY-MM-DDTHH:MM:SSZ" or None
+
+        # Validation
+        if not all([teacher_id, section_id, title, message]):
+            return JsonResponse({"error": "Missing required fields (teacher_id, section_id, title, message)."}, status=400)
+
+        teacher = Teacher.objects.get(id=teacher_id)
+        section = ClassSection.objects.get(id=section_id)
+        subject = Subject.objects.get(id=subject_id) if subject_id else None
+
+        # Create Notification
+        notification = Notification.objects.create(
+            teacher=teacher,
+            section=section,
+            subject=subject,
+            title=title,
+            message=message,
+            deadline=deadline
+        )
+
+        return JsonResponse({
+            "status": "success", 
+            "message": "Notification created successfully.",
+            "notification_id": notification.id
+        }, status=201)
+
+    except Teacher.DoesNotExist:
+        return JsonResponse({"error": "Teacher not found."}, status=404)
+    except ClassSection.DoesNotExist:
+        return JsonResponse({"error": "Section not found."}, status=404)
+    except Subject.DoesNotExist:
+        return JsonResponse({"error": "Subject not found."}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ---------------------------------------------------------
+# STUDENT: Get Notifications
+# ---------------------------------------------------------
+@require_GET
+def get_student_notifications(request, roll_number):
+    try:
+        student = Student.objects.select_related('section').get(roll_number=roll_number)
+    except Student.DoesNotExist:
+        return JsonResponse({"error": "Student not found."}, status=404)
+
+    if not student.section:
+        return JsonResponse([], safe=False)
+
+    # Fetch notifications for the student's section, newest first
+    notifications = Notification.objects.filter(section=student.section).order_by('-created_at')
+
+    data = []
+    for notif in notifications:
+        data.append({
+            "id": notif.id,
+            "title": notif.title,
+            "message": notif.message,
+            "teacher_name": notif.teacher.name,
+            "subject_name": notif.subject.name if notif.subject else "General Announcement",
+            "deadline": notif.deadline.isoformat() if notif.deadline else None,
+            "created_at": notif.created_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    return JsonResponse(data, safe=False)
+
+    # ---------------------------------------------------------
+# TEACHER: Get Created Notifications
+# ---------------------------------------------------------
+@require_GET
+def get_teacher_notifications(request, teacher_id):
+    try:
+        # Check if the teacher exists
+        teacher = Teacher.objects.get(id=teacher_id)
+    except Teacher.DoesNotExist:
+        return JsonResponse({"error": "Teacher not found."}, status=404)
+
+    # Fetch notifications created by this teacher
+    # Using select_related to optimize database queries for section and subject names
+    notifications = Notification.objects.filter(teacher=teacher).select_related('section', 'subject').order_by('-created_at')
+
+    data = []
+    for notif in notifications:
+        data.append({
+            "id": notif.id,
+            "title": notif.title,
+            "message": notif.message,
+            "section_name": notif.section.name,
+            "subject_name": notif.subject.name if notif.subject else "General Announcement",
+            "deadline": notif.deadline.isoformat() if notif.deadline else None,
+            "created_at": notif.created_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    return JsonResponse(data, safe=False)

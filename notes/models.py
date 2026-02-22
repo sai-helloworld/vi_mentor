@@ -152,3 +152,25 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender}: {self.message_text[:30]}"
+
+
+
+from django.db import models
+from .models import Teacher, ClassSection, Subject, Student # Ensure these are imported
+
+class Notification(models.Model):
+    id = models.AutoField(primary_key=True)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    
+    # Relationships
+    teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name='notifications')
+    section = models.ForeignKey(ClassSection, on_delete=models.CASCADE, related_name='section_notifications')
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE, null=True, blank=True) # Optional: if it's specific to a subject
+    
+    # Time metadata
+    deadline = models.DateTimeField(null=True, blank=True) # Optional: for assignments/tests
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.title} - {self.section.name}"
