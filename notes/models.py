@@ -174,3 +174,45 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.title} - {self.section.name}"
+    
+
+# 🧠 Teacher Chat Session
+class TeacherChatSession(models.Model):
+    id = models.AutoField(primary_key=True)
+    teacher = models.ForeignKey(
+        Teacher,
+        on_delete=models.CASCADE,
+        related_name="teacher_chat_sessions"
+    )
+    
+    # Optional: If the teacher wants to chat specifically about a subject they teach
+    # (e.g., "Generate a 10-question quiz for Data Structures")
+    subject = models.ForeignKey(Subject, on_delete=models.SET_NULL, null=True, blank=True)
+
+    title = models.CharField(max_length=255, blank=True)
+    summary = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        subject_name = f" ({self.subject.name})" if self.subject else ""
+        return f"{self.teacher.name}{subject_name} - {self.title or 'New Conversation'}"
+
+
+# 💬 Teacher Chat Message
+class TeacherChatMessage(models.Model):
+    session = models.ForeignKey(
+        TeacherChatSession,
+        on_delete=models.CASCADE,
+        related_name="messages"
+    )
+    sender = models.CharField(
+        max_length=10,
+        choices=[("USER", "Teacher"), ("BOT", "Bot")]
+    )
+    message_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.sender}: {self.message_text[:30]}"

@@ -2215,6 +2215,277 @@ def ask_debate(request):
 
 
 
+
+
+from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+import json
+from .models import Teacher, Subject, TeacherChatSession, TeacherChatMessage
+
+# ==========================================
+# 🏫 TEACHER CHAT HISTORY APIS
+# ==========================================
+
+@csrf_exempt
+@require_POST
+def create_teacher_chat(request):
+    """Creates a new empty chat session for a teacher."""
+    try:
+        data = json.loads(request.body)
+        teacher_id = data.get("teacher_id")
+        subject_id = data.get("subject_id")  # Optional: Can be null
+
+        if not teacher_id:
+            return JsonResponse({"error": "Missing teacher_id"}, status=400)
+
+        teacher = Teacher.objects.get(id=teacher_id)
+        
+        # If the teacher wants to bind this chat to a specific subject
+        subject = None
+        if subject_id:
+            try:
+                subject = Subject.objects.get(id=subject_id)
+            except Subject.DoesNotExist:
+                pass # Fallback to no subject if invalid
+
+        session = TeacherChatSession.objects.create(
+            teacher=teacher,
+            subject=subject,
+            title="New Conversation"
+        )
+
+        return JsonResponse({
+            "session_id": session.id,
+            "title": session.title,
+            "subject": subject.name if subject else None
+        }, status=201)
+
+    except Teacher.DoesNotExist:
+        return JsonResponse({"error": "Teacher not found"}, status=404)
+    except Exception as e:
+        print("Error creating teacher chat:", str(e))
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+@require_GET
+def list_teacher_chats(request, teacher_id):
+    """Returns a list of all chat sessions for a specific teacher for the sidebar."""
+    try:
+        sessions = TeacherChatSession.objects.filter(teacher_id=teacher_id).order_by('-updated_at')
+        
+        sessions_data = []
+        for session in sessions:
+            sessions_data.append({
+                "session_id": session.id,
+                "title": session.title,
+                "subject": session.subject.name if session.subject else "General",
+                "updated_at": session.updated_at.isoformat()
+            })
+
+        return JsonResponse({"sessions": sessions_data})
+
+    except Exception as e:
+        print("Error listing teacher chats:", str(e))
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+@require_GET
+def get_teacher_chat_history(request, session_id):
+    """Returns all messages inside a specific teacher chat session."""
+    try:
+        session = TeacherChatSession.objects.get(id=session_id)
+        messages = TeacherChatMessage.objects.filter(session=session).order_by('created_at')
+
+        messages_data = []
+        for msg in messages:
+            messages_data.append({
+                "id": msg.id,
+                "sender": msg.sender,
+                "message": msg.message_text,
+                "created_at": msg.created_at.isoformat()
+            })
+
+        return JsonResponse({
+            "session_id": session.id,
+            "title": session.title,
+            "messages": messages_data
+        })
+
+    except TeacherChatSession.DoesNotExist:
+        return JsonResponse({"error": "Session not found"}, status=404)
+    except Exception as e:
+        print("Error fetching teacher chat history:", str(e))
+        return JsonResponse({"error": "Internal server error"}, status=500)
+
+
+ALLOWED_MODELS = [
+    'nvidia/nemotron-3-nano-30b-a3b:free',
+    'nvidia/nemotron-nano-9b-v2:free',
+    'qwen/qwen3-235b-a22b-thinking-2507',
+    # 'meta-llama/llama-3-8b-instruct:free',  <-- Example of adding a new one!
+]
+DEFAULT_MODEL = ALLOWED_MODELS[0]
+DEFAULT_JUDGE = ALLOWED_MODELS[-1]
+
+from .models import TeacherChatSession, TeacherChatMessage
+from .teacher_debate_utils import run_teacher_debate
+
+@csrf_exempt
+@require_POST
+def teacher_ask_question(request):
+    """Standard General Knowledge chat for Teachers"""
+    try:
+        data = json.loads(request.body)
+        session_id = data.get("session_id")
+        question = data.get("question")
+        
+        requested_model = data.get("model", DEFAULT_MODEL)
+        if requested_model not in ALLOWED_MODELS:
+            requested_model = DEFAULT_MODEL
+
+        if not session_id or not question:
+            return JsonResponse({"error": "Missing session_id or question"}, status=400)
+
+        try:
+            session = TeacherChatSession.objects.get(id=session_id)
+        except TeacherChatSession.DoesNotExist:
+            return JsonResponse({"error": "Invalid session"}, status=400)
+
+        # 🔹 Build Chat History (Strictly Last 5 Messages)
+        history = TeacherChatMessage.objects.filter(session=session).order_by("-created_at")[:5]
+        history = reversed(history)
+        messages = []
+
+        system_prompt = (
+            "You are a highly capable AI assistant helping a teacher with their academic and administrative work. "
+            "Use your general knowledge to provide accurate, helpful answers.\n"
+            "You MUST respond ONLY in valid JSON format like this:\n"
+            "{\n  \"answer\": \"string\",\n  \"follow_up_questions\": [\"q1\", \"q2\", \"q3\"]\n}\n"
+            "Do not include any extra text outside JSON."
+        )
+
+        messages.append({"role": "system", "content": system_prompt})
+
+        for msg in history:
+            messages.append({"role": "user" if msg.sender == "USER" else "assistant", "content": msg.message_text})
+
+        messages.append({"role": "user", "content": f"Question: {question}"})
+
+        llm = ChatOpenAI(
+            model=requested_model, 
+            openai_api_key=OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1",
+            temperature=0.4, 
+            callbacks=[tracer]
+        )
+
+        raw_response = llm.invoke(messages)
+        content = raw_response.content.strip()
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+            else:
+                raise ValueError("Model did not return valid JSON.")
+
+        answer = parsed.get("answer", "Error generating answer.")
+        follow_ups = parsed.get("follow_up_questions", [])[:3]
+        while len(follow_ups) < 3: follow_ups.append("")
+
+        TeacherChatMessage.objects.create(session=session, sender="USER", message_text=question)
+        TeacherChatMessage.objects.create(session=session, sender="BOT", message_text=answer)
+
+        session.updated_at = timezone.now()
+        if session.title == "New Conversation": 
+            session.title = question[:50]
+        session.save()
+
+        return JsonResponse({"answer": answer, "follow_up_questions": follow_ups, "model_used": requested_model, "mode": "standard"})
+
+    except Exception as e:
+        print("🔥 Teacher API Error:", str(e))
+        return JsonResponse({"answer": "Error generating response.", "follow_up_questions": []}, status=500)
+
+@csrf_exempt
+@require_POST
+def teacher_ask_debate(request):
+    """Debate Mode chat for Teachers (General Knowledge)"""
+    try:
+        data = json.loads(request.body)
+        session_id = data.get("session_id")
+        question = data.get("question")
+        max_rounds = int(data.get("max_rounds", 1))
+
+        judge_model = data.get("judge_model", DEFAULT_JUDGE)
+        if judge_model not in ALLOWED_MODELS:
+            judge_model = DEFAULT_JUDGE
+
+        raw_debaters = data.get("debater_models", [])
+        valid_debaters = [m for m in raw_debaters if m in ALLOWED_MODELS]
+        
+        if not valid_debaters:
+            valid_debaters = [m for m in ALLOWED_MODELS if m != judge_model]
+            if not valid_debaters: 
+                valid_debaters = ALLOWED_MODELS
+
+        if not session_id or not question:
+            return JsonResponse({"error": "Missing session_id or question"}, status=400)
+
+        try:
+            session = TeacherChatSession.objects.get(id=session_id)
+        except TeacherChatSession.DoesNotExist:
+            return JsonResponse({"error": "Invalid session"}, status=400)
+
+        # 🔹 Fetch and Format the past 5 messages into a string for the graph
+        history = TeacherChatMessage.objects.filter(session=session).order_by("-created_at")[:5]
+        history = reversed(history)
+        
+        chat_context_lines = []
+        for msg in history:
+            role = "Teacher" if msg.sender == "USER" else "Assistant"
+            chat_context_lines.append(f"{role}: {msg.message_text}")
+        
+        chat_context_str = "\n".join(chat_context_lines)
+
+        # 🔹 Pass the formatted string into the run function
+        debate_result = run_teacher_debate(
+            question=question, 
+            chat_context=chat_context_str, 
+            debater_models=valid_debaters, 
+            judge_model=judge_model, 
+            max_rounds=max_rounds
+        )
+
+        verdict = debate_result["verdict"]
+        transcript_list = debate_result["transcript"]
+        transcript_text = "\n\n".join(transcript_list)
+        full_text_for_db = f"### ⚖️ Final Verdict\n{verdict}\n\n---\n### 🗣️ Debate Transcript\n{transcript_text}"
+        follow_ups = ["Can you elaborate on that?", "How can I apply this in a classroom?", "Are there alternative approaches?"]
+
+        TeacherChatMessage.objects.create(session=session, sender="USER", message_text=question)
+        TeacherChatMessage.objects.create(session=session, sender="BOT", message_text=full_text_for_db)
+
+        session.updated_at = timezone.now()
+        if session.title == "New Conversation": 
+            session.title = question[:50]
+        session.save()
+
+        return JsonResponse({
+            "answer": full_text_for_db,
+            "verdict": verdict,
+            "transcript": transcript_list,
+            "follow_up_questions": follow_ups,
+            "mode": "debate"
+        })
+
+    except Exception as e:
+        print("🔥 Teacher Debate API Error:", str(e))
+        return JsonResponse({"answer": "Error generating debate.", "verdict": "", "transcript": []}, status=500)
+
+
+
 from django.http import JsonResponse
 from .models import Student, TeacherSubjectAssignment
 
@@ -2363,3 +2634,71 @@ def get_teacher_notifications(request, teacher_id):
         })
 
     return JsonResponse(data, safe=False)
+
+
+
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+from django.db.models import Q
+from .models import Teacher, TeacherSubjectAssignment, ChatMessage
+
+@require_GET
+def get_teacher_chatbot_questions(request, teacher_id):
+    """
+    Returns all chatbot questions asked by students for a specific teacher's 
+    assigned subjects and sections.
+    """
+    try:
+        # 1. Verify the teacher exists
+        try:
+            teacher = Teacher.objects.get(id=teacher_id)
+        except Teacher.DoesNotExist:
+            return JsonResponse({"error": "Teacher not found"}, status=404)
+
+        # 2. Get all exact (Subject, Section) combinations assigned to this teacher
+        assignments = TeacherSubjectAssignment.objects.filter(teacher=teacher)
+        
+        if not assignments.exists():
+            return JsonResponse({"questions": []})
+
+        # 3. Build a dynamic query to find matching ChatSessions
+        # We use Q objects to strictly match the (subject AND section) pairs
+        session_query = Q()
+        for assignment in assignments:
+            session_query |= Q(
+                session__subject=assignment.subject, 
+                session__section=assignment.section
+            )
+
+        # 4. Fetch the messages where sender is "USER" matching those sessions
+        questions = ChatMessage.objects.filter(
+            session_query,
+            sender="USER"
+        ).select_related(
+            'session__student', 
+            'session__subject', 
+            'session__section'
+        ).order_by('-created_at')
+
+        # 5. Format the data for the frontend
+        questions_data = []
+        for msg in questions:
+            questions_data.append({
+                "message_id": msg.id,
+                "question": msg.message_text,
+                "student_name": msg.session.student.name,
+                "student_roll": msg.session.student.roll_number,
+                "subject": msg.session.subject.name,
+                "section": msg.session.section.name,
+                "asked_at": msg.created_at.isoformat()
+            })
+
+        return JsonResponse({
+            "teacher": teacher.name,
+            "total_questions": len(questions_data),
+            "questions": questions_data
+        })
+
+    except Exception as e:
+        print(f"Error fetching teacher questions: {str(e)}")
+        return JsonResponse({"error": "Internal server error"}, status=500)

@@ -42,6 +42,12 @@ urlpatterns += [
     path('api/notifications/create/', views.create_notification, name='create_notification'),
     path('api/student/<str:roll_number>/notifications/', views.get_student_notifications, name='get_student_notifications'),
     path('api/teacher/<int:teacher_id>/notifications/', views.get_teacher_notifications, name='get_teacher_notifications'),
+    path('api/teacher/<int:teacher_id>/chatbot-questions/', views.get_teacher_chatbot_questions),
+    path("teacher-chat/new/", views.create_teacher_chat),
+    path("teacher-chat/list/<int:teacher_id>/", views.list_teacher_chats),
+    path("teacher-chat/history/<int:session_id>/", views.get_teacher_chat_history),
+    path("teacher-chat/ask/", views.teacher_ask_question),
+    path("teacher-chat/debate/", views.teacher_ask_debate),
 ]
 
 
