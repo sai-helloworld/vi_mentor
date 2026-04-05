@@ -135,7 +135,8 @@ def run_debate(question: str, context: str, debater_models: list, judge_model: s
         "debater_models": debater_models,
         "judge_model": judge_model,
         "round_count": 0,
-        "max_rounds": max_rounds,
+        "max_rounds": max_rounds
+        ,
         "current_speaker_idx": 0
     }
     
