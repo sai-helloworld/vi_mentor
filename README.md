@@ -52,4 +52,4 @@ To set up the project locally, follow these steps:
 - Integration with external AI models for enhanced mentoring experience.
 
 ## Repository Links
-- Backend Repository: [sai-helloworld/vi_mentor](https://github.com/sai-helloworld/vi_mentor)
+- Front end Repository: [sai-helloworld/vi_mentor_frontend](https://github.com/sai-helloworld/vi_mentor_frontend)
